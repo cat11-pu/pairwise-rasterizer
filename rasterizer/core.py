@@ -107,7 +107,7 @@ class Edge(object):
 
     def first_row(self):
         """The first pixel row whose sample line meets this edge."""
-        return self.y_top // SUBPIXELS
+        return _ceil_div(self.y_top - HALF, SUBPIXELS)
 
     def crossing(self, sample):
         """Exact x where the sample line cuts the edge, as (numerator, denominator)."""
@@ -118,14 +118,14 @@ def _edge_from(first, second):
     """The edge between two loop vertices, or None when the edge is horizontal."""
     x0, y0 = first
     x1, y1 = second
+    if y0 == y1:
+        return None
     if y0 <= y1:
         x_top, y_top, x_bottom, y_bottom = x0, y0, x1, y1
         winding = 1
     else:
         x_top, y_top, x_bottom, y_bottom = x1, y1, x0, y0
-        winding = 1
-    if y_bottom <= y_top:
-        y_bottom = y_top + 1
+        winding = -1
     return Edge(x_top, y_top, y_bottom, x_bottom - x_top, y_bottom - y_top, winding)
 
 
@@ -148,7 +148,7 @@ def _parity_spans(crossings):
     index = 0
     while index + 1 < len(crossings):
         spans.append((crossings[index][0], crossings[index + 1][0]))
-        index += 1
+        index += 2
     return spans
 
 
@@ -227,10 +227,10 @@ class ScanlineRasterizer(object):
     def _columns(self, start, end, row):
         """The pixel columns of one span, or None when the span covers nothing."""
         first = _ceil_div(start[0] - HALF * start[1], SUBPIXELS * start[1])
-        last = _floor_div(end[0] - HALF * end[1], SUBPIXELS * end[1])
+        last = _ceil_div(end[0] - HALF * end[1], SUBPIXELS * end[1]) - 1
         if self._clip is not None:
             left, top, right, bottom = self._clip
-            if row < top or row >= bottom:
+            if row < top or row > bottom:
                 return None
             first = max(first, left)
             last = min(last, right)
@@ -242,10 +242,10 @@ class ScanlineRasterizer(object):
         """Yield every pixel row of the path together with the spans it covers."""
         first, last = self._row_range()
         active = []
-        for row in range(first, last):
+        for row in range(first, last + 1):
             active.extend(self._edge_table.get(row, ()))
             sample = row * SUBPIXELS + HALF
-            active = [edge for edge in active if sample <= edge.y_bottom]
+            active = [edge for edge in active if sample < edge.y_bottom]
             crossings = [(edge.crossing(sample), edge.winding) for edge in active]
             crossings.sort(key=cmp_to_key(_compare_crossings))
             if self._fill_rule == "nonzero":
